@@ -1,0 +1,10 @@
+ai-model
+├── app.py                            
+├── requirements.txt                  
+├── model/                           
+│   ├── sentiment_model.pkl          
+│   ├── vectorizer.pkl               
+├── data/                            
+│   ├── test.csv                    
+│   ├── train.csv                    
+├── notes.txt                       
