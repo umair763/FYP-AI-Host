@@ -1,14 +1,11 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS
 import joblib
-import os
-
-app = Flask(__name__)
-CORS(app)
 
 # Load the model and vectorizer
 model = joblib.load("model/sentiment_model.pkl")
 vectorizer = joblib.load("model/vectorizer.pkl")
+
+app = Flask(__name__)
 
 @app.route("/predict", methods=["POST"])
 def predict():
@@ -24,4 +21,4 @@ def predict():
     return jsonify({"prediction": prediction})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=7860)
+    app.run(host="0.0.0.0", port=8000)
