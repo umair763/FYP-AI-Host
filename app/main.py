@@ -9,8 +9,8 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Load the saved model and vectorizer using joblib
-model_path = os.path.join('model', 'sentiment_model_logistic_regression.pkl')
-vectorizer_path = os.path.join('model', 'advanced_vectorizer.pkl')
+model_path = os.path.join('model', 'sentiment_model.pkl')
+vectorizer_path = os.path.join('model', 'vectorizer.pkl')
 
 # Ensure the model and vectorizer are loaded properly
 try:
@@ -35,10 +35,14 @@ def preprocess_text(text):
 def predict_sentiment(text):
     try:
         processed_text = preprocess_text(text)
+        # Vectorize the processed text
         text_vectorized = vectorizer.transform([processed_text])
         prediction = model.predict(text_vectorized)[0]
         proba = model.predict_proba(text_vectorized)[0]
+        
+        # Prepare the sentiment scores for each class
         sentiment_scores = {str(label): float(prob) for label, prob in zip(model.classes_, proba)}
+        
         return {
             'text': text,
             'sentiment': str(prediction),
