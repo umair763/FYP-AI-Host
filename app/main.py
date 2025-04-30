@@ -9,14 +9,18 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Load the saved model and vectorizer using joblib
-model_path = os.path.join('model', 'sentiment_model.pkl')
-vectorizer_path = os.path.join('model', 'vectorizer.pkl')
+model_path = os.path.join('model', 'sentiment_model_logistic_regression.pkl')
+vectorizer_path = os.path.join('model', 'advanced_vectorizer.pkl')
 
 # Ensure the model and vectorizer are loaded properly
+model, vectorizer = None, None
 try:
-    model = joblib.load(model_path)
-    vectorizer = joblib.load(vectorizer_path)
-    print("Model and vectorizer loaded successfully.")
+    if os.path.exists(model_path) and os.path.exists(vectorizer_path):
+        model = joblib.load(model_path)
+        vectorizer = joblib.load(vectorizer_path)
+        print("Model and vectorizer loaded successfully.")
+    else:
+        raise FileNotFoundError("Model or vectorizer file not found.")
 except Exception as e:
     print(f"Error loading model or vectorizer: {str(e)}")
 
