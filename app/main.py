@@ -1,30 +1,34 @@
 from flask import Flask, request, jsonify
 import joblib
-import os
+import numpy as np
 
 app = Flask(__name__)
 
-# Load model and vectorizer once
-model = joblib.load(os.path.join("model", "sentiment_model.pkl"))
-vectorizer = joblib.load(os.path.join("model", "vectorizer.pkl"))
+# Load model and vectorizer
+model = joblib.load('app/model/sentiment_model_logistic_regression.pkl')
+vectorizer = joblib.load('app/model/advanced_vectorizer.pkl')
 
-@app.route("/health", methods=["GET"])
-def health_check():
-    return jsonify({"status": "ok"})
-
-@app.route("/analyze", methods=["POST"])
-def analyze():
+@app.route('/analyze', methods=['POST'])
+def analyze_sentiment():
     data = request.get_json()
-    comment = data.get("comment", "").strip()
-    if not comment:
-        return jsonify({"error": "No comment provided"}), 400
-    
-    try:
-        vectorized = vectorizer.transform([comment])
-        prediction = model.predict(vectorized)[0]
-        return jsonify({"sentiment": prediction})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    text = data.get('text', '')
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    if not text:
+        return jsonify({'error': 'No text provided'}), 400
+
+    X = vectorizer.transform([text])
+    prediction = model.predict(X)[0]
+    probs = model.predict_proba(X)[0]
+
+    result = {
+        'sentiment': prediction,
+        'scores': {
+            'negative': float(probs[0]),
+            'neutral': float(probs[1]),
+            'positive': float(probs[2])
+        }
+    }
+    return jsonify(result)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)

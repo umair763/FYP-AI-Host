@@ -1,15 +1,11 @@
 AI-Model/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py
-├── model/
-│   ├── sentiment_model.pkl
-│   ├── vectorizer.pkl
-├── Dockerfile
-├── requirements.txt
-├── nginx/
-│   └── default.conf
-├── certbot/
-│   └── init-letsencrypt.sh    # Auto SSL
-├── docker-compose.yml
-└── README.md
+│   ├── model/
+│   │   ├── sentiment_model_logistic_regression.pkl
+│   │   └── advanced_vectorizer.pkl
+│   ├── main.py                  # API server code (Flask/FastAPI)
+│   └── requirements.txt         # Python dependencies
+├── Dockerfile                   # For containerized deployment (optional but recommended)
+├── .env                         # (Optional) for API keys or configs
+├── README.md
