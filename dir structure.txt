@@ -1,10 +1,15 @@
-ai-model
-├── app.py                            
-├── requirements.txt                  
-├── model/                           
-│   ├── sentiment_model.pkl          
-│   ├── vectorizer.pkl               
-├── data/                            
-│   ├── test.csv                    
-│   ├── train.csv                    
-├── notes.txt                       
+AI-Model/
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+├── model/
+│   ├── sentiment_model.pkl
+│   ├── vectorizer.pkl
+├── Dockerfile
+├── requirements.txt
+├── nginx/
+│   └── default.conf
+├── certbot/
+│   └── init-letsencrypt.sh    # Auto SSL
+├── docker-compose.yml
+└── README.md

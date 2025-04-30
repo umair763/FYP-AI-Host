@@ -1,16 +1,12 @@
 FROM python:3.10-slim
 
-# Create working directory
 WORKDIR /app
 
-# Copy all files to container
-COPY . .
-
-# Install dependencies
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose the port Flask will run on
-EXPOSE 8080
+COPY app ./app
+COPY model ./model
 
-# Run your app
-CMD ["python", "app.py"]
+WORKDIR /app/app
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
