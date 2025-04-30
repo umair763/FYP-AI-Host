@@ -1,16 +1,22 @@
 #!/bin/bash
 
 domains=(ml-api.socialsight.me)
-email="muhammadumairkhan945@gmail.com"
+email="muhammadumairkhan945@gmail.com" 
 rsa_key_size=4096
 data_path="./certbot"
-staging=0 # change to 1 for testing certbot
+staging=0 # Set to 1 if testing
 
-docker-compose run --rm --entrypoint "\
-  certbot certonly --webroot \
-  --webroot-path=/var/lib/letsencrypt \
+mkdir -p "$data_path/www"
+
+docker-compose run --rm \
+  -v "$PWD/certbot/www:/var/www/certbot" \
+  -v "$PWD/certbot/etc:/etc/letsencrypt" \
+  -v "$PWD/certbot/lib:/var/lib/letsencrypt" \
+  certbot/certbot certonly \
+  --webroot \
+  --webroot-path /var/www/certbot \
   --email $email \
   --agree-tos \
   --no-eff-email \
-  ${staging:+--staging} \
-  -d ${domains[*]}" certbot
+  -d ${domains[@]} \
+  ${staging:+--staging}
