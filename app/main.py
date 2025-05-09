@@ -11,25 +11,38 @@ from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 import nltk
+import time
+
+# Import config values or use defaults
+try:
+    from .config import *
+except ImportError:
+    try:
+        import config
+    except ImportError:
+        # Default config values if config.py is not available
+        MODEL_DIR = os.path.join('model')
+        MODEL_FILE = os.path.join(MODEL_DIR, 'sentiment_model_logistic_regression_NEW.pkl')
+        VECTORIZER_FILE = os.path.join(MODEL_DIR, 'advanced_vectorizer_NEW.pkl')
+        LOG_LEVEL = 'INFO'
+        LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        DEFAULT_SENTIMENT = 'neutral'
+        DEFAULT_SCORES = {'positive': 0.33, 'negative': 0.33, 'neutral': 0.34}
+        os.makedirs(MODEL_DIR, exist_ok=True)
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, 
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Load the saved model and vectorizer using joblib
-model_path = os.path.join('model', 'sentiment_model_logistic_regression_NEW.pkl')
-vectorizer_path = os.path.join('model', 'advanced_vectorizer_NEW.pkl')
-
 # Global variables for model and vectorizer
 model = None
 vectorizer = None
 
-# Download necessary NLTK resources at startup
+# Download necessary NLTK resources
 def download_nltk_resources():
     try:
         nltk.download('stopwords', quiet=True)
@@ -40,49 +53,33 @@ def download_nltk_resources():
         return True
     except Exception as e:
         logger.error(f"Error downloading NLTK resources: {str(e)}")
-        logger.error(traceback.format_exc())
         return False
 
 # Load model and vectorizer
 def load_models():
     global model, vectorizer
     try:
-        logger.info(f"Attempting to load model from: {os.path.abspath(model_path)}")
-        logger.info(f"Attempting to load vectorizer from: {os.path.abspath(vectorizer_path)}")
+        logger.info(f"Attempting to load model from: {os.path.abspath(MODEL_FILE)}")
+        logger.info(f"Attempting to load vectorizer from: {os.path.abspath(VECTORIZER_FILE)}")
         
-        if os.path.exists(model_path) and os.path.exists(vectorizer_path):
-            model = joblib.load(model_path)
-            vectorizer = joblib.load(vectorizer_path)
+        if os.path.exists(MODEL_FILE) and os.path.exists(VECTORIZER_FILE):
+            model = joblib.load(MODEL_FILE)
+            vectorizer = joblib.load(VECTORIZER_FILE)
+            
             logger.info("Model and vectorizer loaded successfully.")
-            logger.info(f"Model type: {type(model)}")
-            logger.info(f"Vectorizer type: {type(vectorizer)}")
-            if hasattr(model, 'classes_'):
-                logger.info(f"Model classes: {model.classes_}")
-            # Try a sample prediction for debugging
-            try:
-                sample_text = "This is a test."
-                processed = comprehensive_preprocess_text(sample_text)
-                logger.info(f"Sample processed text: {processed}")
-                sample_vec = vectorizer.transform([processed])
-                logger.info(f"Sample vectorized shape: {sample_vec.shape}")
-                pred = model.predict(sample_vec)
-                logger.info(f"Sample prediction: {pred}")
-            except Exception as pred_e:
-                logger.error(f"Error during sample prediction: {str(pred_e)}")
-                logger.error(traceback.format_exc())
+            logger.info(f"Model classes: {model.classes_}")
+            logger.info(f"Vectorizer vocabulary size: {len(vectorizer.vocabulary_)}")
             return True
         else:
-            available_files = os.listdir(os.path.dirname(model_path)) if os.path.exists(os.path.dirname(model_path)) else []
-            logger.error(f"Model or vectorizer file not found. Available files in directory: {available_files}")
+            logger.error("Model or vectorizer file not found.")
             return False
     except Exception as e:
         logger.error(f"Error loading model or vectorizer: {str(e)}")
-        logger.error(traceback.format_exc())
         return False
 
-# Comprehensive text preprocessing function that matches the training preprocessing pipeline
+# Comprehensive text preprocessing function 
 def comprehensive_preprocess_text(text):
-    """Complete text preprocessing pipeline following lecture guidelines"""
+    """Complete text preprocessing pipeline matching training"""
     if not isinstance(text, str):
         return ""
     
@@ -104,7 +101,7 @@ def comprehensive_preprocess_text(text):
     # 3. Tokenization
     try:
         tokens = word_tokenize(text)
-    except:
+    except Exception:
         tokens = text.split()
     
     # 4. Remove punctuation
@@ -114,31 +111,18 @@ def comprehensive_preprocess_text(text):
     try:
         stop_words = set(stopwords.words('english'))
         tokens = [word for word in tokens if word not in stop_words]
-    except:
-        # Fallback if NLTK resources not available
-        tokens = tokens
+    except Exception:
+        pass
     
     # 6. Apply stemming
     try:
         stemmer = PorterStemmer()
         tokens = [stemmer.stem(word) for word in tokens]
-    except:
-        # Fallback if stemming fails
+    except Exception:
         pass
     
     # Join back to string
     return ' '.join(tokens)
-
-# Fallback simple preprocessing for compatibility
-def preprocess_text(text):
-    if not isinstance(text, str):
-        return ""
-    text = text.lower()
-    text = re.sub(r'https?://\S+|www\.\S+', '', text)  # Remove URLs
-    text = re.sub(r'<.*?>', '', text)  # Remove HTML tags
-    text = re.sub(r'[^a-zA-Z\s]', '', text)  # Remove non-alphabet characters
-    text = re.sub(r'\s+', ' ', text).strip()  # Normalize spaces
-    return text
 
 # Get descriptive interpretation of sentiment
 def get_sentiment_description(sentiment, scores):
@@ -175,8 +159,8 @@ def predict_sentiment(text):
             logger.error("Failed to load models, returning default response")
             return {
                 'text': text,
-                'sentiment': 'neutral',
-                'scores': {'positive': 0.33, 'negative': 0.33, 'neutral': 0.34},
+                'sentiment': DEFAULT_SENTIMENT,
+                'scores': DEFAULT_SCORES,
                 'description': 'Model or vectorizer not available. Using default response.',
                 'error': 'Model or vectorizer not available'
             }
@@ -184,21 +168,25 @@ def predict_sentiment(text):
     try:
         # Use the comprehensive preprocessing to match training
         processed_text = comprehensive_preprocess_text(text)
-        logger.info(f"Processed text: {processed_text}")
+        
+        # Check if processed text is empty
+        if not processed_text.strip():
+            processed_text = "empty text"  # Fallback to avoid empty input
         
         # Vectorize the processed text
         text_vectorized = vectorizer.transform([processed_text])
+        
+        # Get prediction and probabilities
         prediction = model.predict(text_vectorized)[0]
         proba = model.predict_proba(text_vectorized)[0]
         
         # Prepare the sentiment scores for each class
-        sentiment_scores = {str(label): float(prob) for label, prob in zip(model.classes_, proba)}
+        sentiment_scores = {str(cls): float(prob) for cls, prob in zip(model.classes_, proba)}
         
         # Get descriptive interpretation
         sentiment_description = get_sentiment_description(str(prediction), sentiment_scores)
         
-        logger.info(f"Prediction: {prediction}, Scores: {sentiment_scores}")
-        logger.info(f"Description: {sentiment_description}")
+        logger.info(f"Prediction: {prediction}, Top score: {max(sentiment_scores.values()):.4f}")
         
         return {
             'text': text,
@@ -208,11 +196,10 @@ def predict_sentiment(text):
         }
     except Exception as e:
         logger.error(f"Error during prediction: {str(e)}")
-        logger.error(traceback.format_exc())
         return {
             'text': text,
-            'sentiment': 'neutral',
-            'scores': {'positive': 0.33, 'negative': 0.33, 'neutral': 0.34},
+            'sentiment': DEFAULT_SENTIMENT,
+            'scores': DEFAULT_SCORES,
             'description': 'An error occurred during sentiment analysis. Using default response.',
             'error': str(e)
         }
@@ -221,24 +208,47 @@ def predict_sentiment(text):
 @app.route('/analyze', methods=['POST'])
 def analyze():
     try:
+        # Get request data
         data = request.get_json()
-        logger.info(f"Received data: {data}")  # Log incoming data to help debug
         
-        if not data or 'text' not in data:
+        if not data:
+            return jsonify({
+                'error': 'No data provided',
+                'description': 'Please provide a valid JSON request body.'
+            }), 400
+            
+        if 'text' not in data:
             return jsonify({
                 'error': 'No text provided',
                 'description': 'Please provide a text field in your JSON request body.'
             }), 400
-            
+        
+        # Extract text for analysis    
         text = data['text']
+        
+        # Validate text input
+        if not isinstance(text, str):
+            text = str(text)
+            
+        if not text.strip():
+            return jsonify({
+                'error': 'Empty text',
+                'description': 'Please provide non-empty text for analysis.',
+                'sentiment': DEFAULT_SENTIMENT,
+                'scores': DEFAULT_SCORES
+            }), 400
+        
+        # Perform sentiment prediction
         result = predict_sentiment(text)
+        
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error in analyze endpoint: {str(e)}")
-        logger.error(traceback.format_exc())
         return jsonify({
             'error': str(e),
-            'description': 'An unexpected error occurred while processing your request.'
+            'description': 'An unexpected error occurred while processing your request.',
+            'sentiment': DEFAULT_SENTIMENT,
+            'scores': DEFAULT_SCORES
         }), 500
 
 # Health check endpoint
@@ -283,7 +293,6 @@ def index():
 @app.errorhandler(Exception)
 def handle_error(e):
     logger.error(f"Unhandled exception: {str(e)}")
-    logger.error(traceback.format_exc())
     return jsonify({
         'error': str(e),
         'description': 'An unexpected server error occurred.'
@@ -297,15 +306,14 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
     return response
 
-# Download NLTK resources and load models at startup
-download_nltk_resources()
-load_models()
-
 # Run the app
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', os.environ.get('WEBSITES_PORT', 5000)))
+    # Download NLTK resources at startup
+    download_nltk_resources()
+    
     # Load models at startup
     if not load_models():
         logger.warning("Starting application without models loaded. Health checks will fail.")
     
+    port = int(os.environ.get('PORT', os.environ.get('WEBSITES_PORT', 5000)))
     app.run(debug=False, host='0.0.0.0', port=port)
