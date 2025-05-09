@@ -4,6 +4,7 @@ import joblib
 import re
 import os
 import logging
+import traceback
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -33,6 +34,22 @@ def load_models():
             model = joblib.load(model_path)
             vectorizer = joblib.load(vectorizer_path)
             logger.info("Model and vectorizer loaded successfully.")
+            logger.info(f"Model type: {type(model)}")
+            logger.info(f"Vectorizer type: {type(vectorizer)}")
+            if hasattr(model, 'classes_'):
+                logger.info(f"Model classes: {model.classes_}")
+            # Try a sample prediction for debugging
+            try:
+                sample_text = "This is a test."
+                processed = preprocess_text(sample_text)
+                logger.info(f"Sample processed text: {processed}")
+                sample_vec = vectorizer.transform([processed])
+                logger.info(f"Sample vectorized shape: {sample_vec.shape}")
+                pred = model.predict(sample_vec)
+                logger.info(f"Sample prediction: {pred}")
+            except Exception as pred_e:
+                logger.error(f"Error during sample prediction: {str(pred_e)}")
+                logger.error(traceback.format_exc())
             return True
         else:
             available_files = os.listdir(os.path.dirname(model_path)) if os.path.exists(os.path.dirname(model_path)) else []
@@ -40,6 +57,7 @@ def load_models():
             return False
     except Exception as e:
         logger.error(f"Error loading model or vectorizer: {str(e)}")
+        logger.error(traceback.format_exc())
         return False
 
 # Text preprocessing function
