@@ -6,8 +6,12 @@ BASE_DIR = os.path.dirname(APP_DIR)
 
 # Model settings
 MODEL_DIR = os.path.join(APP_DIR, 'model')
-MODEL_FILE = os.path.join(MODEL_DIR, 'sentiment_model_logistic_regression_NEW.pkl')
-VECTORIZER_FILE = os.path.join(MODEL_DIR, 'advanced_vectorizer_NEW.pkl')
+MODEL_FILE = os.path.join(MODEL_DIR, 'sentiment_model.pkl')
+VECTORIZER_FILE = os.path.join(MODEL_DIR, 'vectorizer.pkl')
+ENCODER_FILE = os.path.join(MODEL_DIR, 'label_encoder.pkl')
+
+# XGBoost specific settings
+CONFIDENCE_THRESHOLD = 0.6  # Threshold for prediction confidence
 
 # Logging settings
 LOG_DIR = os.path.join(APP_DIR, 'logs')
@@ -21,7 +25,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 # API settings
 DEBUG_MODE = os.environ.get('DEBUG', 'False').lower() in ('true', '1', 't')
-PORT = int(os.environ.get('PORT', os.environ.get('WEBSITES_PORT', 5000)))
+PORT = int(os.environ.get('PORT', os.environ.get('WEBSITES_PORT', 8080)))
 HOST = '0.0.0.0'
 
 # Feature settings

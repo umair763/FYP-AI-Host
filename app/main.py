@@ -11,16 +11,19 @@ from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 import nltk
-import time
 import sys
+import time
+import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
+from xgboost import XGBClassifier
 
 # Define default config values
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.path.join(APP_DIR, 'model')
-MODEL_FILE = os.path.join(MODEL_DIR, 'sentiment_model_logistic_regression_NEW.pkl')
-VECTORIZER_FILE = os.path.join(MODEL_DIR, 'advanced_vectorizer_NEW.pkl')
+MODEL_FILE = os.path.join(MODEL_DIR, 'sentiment_model.pkl')
+VECTORIZER_FILE = os.path.join(MODEL_DIR, 'vectorizer.pkl')
+ENCODER_FILE = os.path.join(MODEL_DIR, 'label_encoder.pkl')
+CONFIDENCE_THRESHOLD = 0.6
 LOG_LEVEL = 'INFO'
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 DEFAULT_SENTIMENT = 'neutral'
@@ -40,6 +43,10 @@ except ImportError:
             MODEL_FILE = config.MODEL_FILE
         if hasattr(config, 'VECTORIZER_FILE'):
             VECTORIZER_FILE = config.VECTORIZER_FILE
+        if hasattr(config, 'ENCODER_FILE'):
+            ENCODER_FILE = config.ENCODER_FILE
+        if hasattr(config, 'CONFIDENCE_THRESHOLD'):
+            CONFIDENCE_THRESHOLD = config.CONFIDENCE_THRESHOLD
         if hasattr(config, 'DEFAULT_SENTIMENT'):
             DEFAULT_SENTIMENT = config.DEFAULT_SENTIMENT
         if hasattr(config, 'DEFAULT_SCORES'):
@@ -53,50 +60,57 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 logger.info(f"Using model file: {MODEL_FILE}")
 logger.info(f"Using vectorizer file: {VECTORIZER_FILE}")
+logger.info(f"Using encoder file: {ENCODER_FILE}")
 
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Global variables for model and vectorizer
+# Global variables for model components
 model = None
 vectorizer = None
+encoder = None
 
 # Download necessary NLTK resources
 def download_nltk_resources():
     try:
         nltk.download('stopwords', quiet=True)
         nltk.download('punkt', quiet=True)
-        nltk.download('wordnet', quiet=True)
-        nltk.download('omw-1.4', quiet=True)
         logger.info("NLTK resources downloaded successfully")
         return True
     except Exception as e:
         logger.error(f"Error downloading NLTK resources: {str(e)}")
+        logger.error(traceback.format_exc())
         return False
 
-# Load model and vectorizer
+# Load model components
 def load_models():
-    global model, vectorizer
+    global model, vectorizer, encoder
     try:
         logger.info(f"Attempting to load model from: {os.path.abspath(MODEL_FILE)}")
         logger.info(f"Attempting to load vectorizer from: {os.path.abspath(VECTORIZER_FILE)}")
+        logger.info(f"Attempting to load encoder from: {os.path.abspath(ENCODER_FILE)}")
         
         # Check if files exist
         model_exists = os.path.exists(MODEL_FILE)
         vectorizer_exists = os.path.exists(VECTORIZER_FILE)
+        encoder_exists = os.path.exists(ENCODER_FILE)
         
         logger.info(f"Model file exists: {model_exists}")
         logger.info(f"Vectorizer file exists: {vectorizer_exists}")
+        logger.info(f"Encoder file exists: {encoder_exists}")
         
-        if model_exists and vectorizer_exists:
-            # Load the model and vectorizer files
+        if model_exists and vectorizer_exists and encoder_exists:
+            # Load the model, vectorizer and encoder
             model = joblib.load(MODEL_FILE)
             vectorizer = joblib.load(VECTORIZER_FILE)
+            encoder = joblib.load(ENCODER_FILE)
             
-            logger.info("Model and vectorizer loaded successfully.")
+            logger.info("Model components loaded successfully.")
             if hasattr(model, 'classes_'):
                 logger.info(f"Model classes: {model.classes_}")
+            if hasattr(encoder, 'classes_'):
+                logger.info(f"Encoder classes: {encoder.classes_}")
             if hasattr(vectorizer, 'vocabulary_'):
                 logger.info(f"Vectorizer vocabulary size: {len(vectorizer.vocabulary_)}")
             return True
@@ -105,81 +119,77 @@ def load_models():
             alt_model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model')
             alt_model_file = os.path.join(alt_model_dir, os.path.basename(MODEL_FILE))
             alt_vectorizer_file = os.path.join(alt_model_dir, os.path.basename(VECTORIZER_FILE))
+            alt_encoder_file = os.path.join(alt_model_dir, os.path.basename(ENCODER_FILE))
             
             logger.info(f"Trying alternate path for model: {alt_model_file}")
             logger.info(f"Trying alternate path for vectorizer: {alt_vectorizer_file}")
+            logger.info(f"Trying alternate path for encoder: {alt_encoder_file}")
             
-            if os.path.exists(alt_model_file) and os.path.exists(alt_vectorizer_file):
+            if (os.path.exists(alt_model_file) and 
+                os.path.exists(alt_vectorizer_file) and 
+                os.path.exists(alt_encoder_file)):
+                
                 model = joblib.load(alt_model_file)
                 vectorizer = joblib.load(alt_vectorizer_file)
-                logger.info("Model and vectorizer loaded from alternate path successfully.")
+                encoder = joblib.load(alt_encoder_file)
+                logger.info("Model components loaded from alternate path successfully.")
                 return True
             
-            logger.error("Model or vectorizer file not found in any of the checked locations.")
+            logger.error("Model files not found in any of the checked locations.")
             return False
     except Exception as e:
-        logger.error(f"Error loading model or vectorizer: {str(e)}")
-        logger.error(traceback.format_exc())  # Include traceback for debugging
+        logger.error(f"Error loading model components: {str(e)}")
+        logger.error(traceback.format_exc())
         return False
 
-# Comprehensive text preprocessing function 
-def comprehensive_preprocess_text(text):
-    """Complete text preprocessing pipeline matching training"""
-    if not isinstance(text, str):
-        return ""
-    
-    # 1. Normalization
-    # Remove URLs
-    text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)
-    # Remove user mentions and hashtags
-    text = re.sub(r'@\w+|#\w+', '', text)
-    # Remove HTML tags
-    text = re.sub(r'<.*?>', '', text)
-    # Remove special characters and numbers
-    text = re.sub(r'[^a-zA-Z\s]', '', text)
-    # Replace multiple whitespace with single space
-    text = re.sub(r'\s+', ' ', text)
-    
-    # 2. Case normalization
-    text = text.lower().strip()
-    
-    # 3. Tokenization
+# Text preprocessing function matching the training code
+def preprocess_text(text):
+    """Process text using the same function as during model training"""
     try:
+        # Ensure text is a string
+        text = str(text).lower()
+        
+        # Remove URLs
+        text = re.sub(r"http\S+|www\S+|https\S+", '', text)
+        
+        # Remove HTML tags
+        text = re.sub(r"<.*?>", '', text)
+        
+        # Remove punctuation except apostrophes
+        punctuation_without_apostrophe = string.punctuation.replace("'", "")
+        text = re.sub(f"[{re.escape(punctuation_without_apostrophe)}]", '', text)
+        
+        # Remove numbers
+        text = re.sub(r"\d+", '', text)
+        
+        # Replace repeated characters
+        text = re.sub(r'(.)\1{2,}', r'\1\1', text)
+        
+        # Tokenize
         tokens = word_tokenize(text)
-    except Exception:
-        tokens = text.split()
-    
-    # 4. Remove punctuation
-    tokens = [token for token in tokens if token not in string.punctuation]
-    
-    # 5. Remove stopwords
-    try:
+        
+        # Remove stopwords and apply stemming
         stop_words = set(stopwords.words('english'))
-        tokens = [word for word in tokens if word not in stop_words]
-    except Exception:
-        pass
-    
-    # 6. Apply stemming
-    try:
         stemmer = PorterStemmer()
-        tokens = [stemmer.stem(word) for word in tokens]
-    except Exception:
-        pass
-    
-    # Join back to string
-    return ' '.join(tokens)
+        tokens = [stemmer.stem(word) for word in tokens if word not in stop_words]
+        
+        # Join tokens back into text
+        return " ".join(tokens)
+    except Exception as e:
+        logger.error(f"Error in text preprocessing: {str(e)}")
+        logger.error(traceback.format_exc())
+        return text  # Return original text if processing fails
 
 # Get descriptive interpretation of sentiment
-def get_sentiment_description(sentiment, scores):
+def get_sentiment_description(sentiment, confidence):
     """Generate a descriptive interpretation of the sentiment analysis results"""
     try:
-        max_score = max(scores.values())
         confidence_level = ""
-        if max_score >= 0.9:
+        if confidence >= 0.9:
             confidence_level = "very high confidence"
-        elif max_score >= 0.75:
+        elif confidence >= 0.75:
             confidence_level = "high confidence"
-        elif max_score >= 0.6:
+        elif confidence >= 0.6:
             confidence_level = "moderate confidence"
         else:
             confidence_level = "low confidence"
@@ -194,25 +204,26 @@ def get_sentiment_description(sentiment, scores):
         logger.error(f"Error generating sentiment description: {str(e)}")
         return "Unable to generate detailed sentiment description."
 
-# Predict sentiment
+# Predict sentiment using XGBoost model
 def predict_sentiment(text):
-    global model, vectorizer
+    global model, vectorizer, encoder
     
-    # Check if model and vectorizer are loaded
-    if model is None or vectorizer is None:
+    # Check if model components are loaded
+    if model is None or vectorizer is None or encoder is None:
         if not load_models():
-            logger.error("Failed to load models, returning default response")
+            logger.error("Failed to load model components, returning default response")
             return {
                 'text': text,
                 'sentiment': DEFAULT_SENTIMENT,
                 'scores': DEFAULT_SCORES,
-                'description': 'Model or vectorizer not available. Using default response.',
-                'error': 'Model or vectorizer not available'
+                'description': 'Model components not available. Using default response.',
+                'error': 'Model components not available'
             }
     
     try:
-        # Use the comprehensive preprocessing to match training
-        processed_text = comprehensive_preprocess_text(text)
+        # Use the preprocessing function that matches training
+        processed_text = preprocess_text(text)
+        logger.info(f"Processed text: {processed_text[:100]}...")
         
         # Check if processed text is empty
         if not processed_text.strip():
@@ -221,26 +232,43 @@ def predict_sentiment(text):
         # Vectorize the processed text
         text_vectorized = vectorizer.transform([processed_text])
         
-        # Get prediction and probabilities
-        prediction = model.predict(text_vectorized)[0]
-        proba = model.predict_proba(text_vectorized)[0]
+        # Get prediction probabilities from the model
+        probabilities = model.predict_proba(text_vectorized)[0]
+        
+        # Get the highest probability class index and confidence score
+        predicted_class_index = np.argmax(probabilities)
+        confidence = np.max(probabilities)
+        
+        # Apply confidence threshold
+        if confidence < CONFIDENCE_THRESHOLD:
+            # Default to neutral if confidence is below threshold
+            neutral_index = np.where(encoder.classes_ == 'neutral')[0]
+            if len(neutral_index) > 0:
+                prediction = 'neutral'
+            else:
+                prediction = encoder.inverse_transform([predicted_class_index])[0]
+        else:
+            # Use predicted class if confidence is sufficient
+            prediction = encoder.inverse_transform([predicted_class_index])[0]
         
         # Prepare the sentiment scores for each class
-        sentiment_scores = {str(cls): float(prob) for cls, prob in zip(model.classes_, proba)}
+        sentiment_scores = {str(cls): float(prob) for cls, prob in zip(encoder.classes_, probabilities)}
         
         # Get descriptive interpretation
-        sentiment_description = get_sentiment_description(str(prediction), sentiment_scores)
+        sentiment_description = get_sentiment_description(prediction, confidence)
         
-        logger.info(f"Prediction: {prediction}, Top score: {max(sentiment_scores.values()):.4f}")
+        logger.info(f"Prediction: {prediction}, Confidence: {confidence:.4f}")
         
         return {
             'text': text,
             'sentiment': str(prediction),
             'scores': sentiment_scores,
+            'confidence': float(confidence),
             'description': sentiment_description
         }
     except Exception as e:
         logger.error(f"Error during prediction: {str(e)}")
+        logger.error(traceback.format_exc())
         return {
             'text': text,
             'sentiment': DEFAULT_SENTIMENT,
@@ -289,6 +317,7 @@ def analyze():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error in analyze endpoint: {str(e)}")
+        logger.error(traceback.format_exc())
         return jsonify({
             'error': str(e),
             'description': 'An unexpected error occurred while processing your request.',
@@ -305,15 +334,17 @@ def health():
     # Check if models are loaded
     model_status = "loaded" if model is not None else "not loaded"
     vectorizer_status = "loaded" if vectorizer is not None else "not loaded"
+    encoder_status = "loaded" if encoder is not None else "not loaded"
     nltk_status = "available" if 'punkt' in nltk.data.path else "not available"
     
     return jsonify({
-        'status': 'healthy' if model is not None and vectorizer is not None else 'unhealthy',
+        'status': 'healthy' if model is not None and vectorizer is not None and encoder is not None else 'unhealthy',
         'message': 'Service is running',
         'model_status': model_status,
         'vectorizer_status': vectorizer_status,
+        'encoder_status': encoder_status,
         'nltk_resources': nltk_status,
-        'version': 'v2.0 (optimized model)'
+        'version': 'v3.0 (XGBoost model)'
     })
 
 # Root endpoint
@@ -322,15 +353,15 @@ def index():
     if request.method == 'OPTIONS':
         return jsonify({'status': 'ok'})
     return jsonify({
-        'message': 'Welcome to the Advanced Sentiment Analysis API',
-        'version': 'v2.0',
+        'message': 'Advanced Sentiment Analysis API with XGBoost Model',
+        'version': 'v3.0',
         'usage': {
             'endpoint': '/analyze',
             'method': 'POST',
             'body': {
                 'text': 'Your text to analyze'
             },
-            'example': 'curl -X POST "https://your-api-url/analyze" -H "Content-Type: application/json" -d \'{"text": "I love this product!"}\''
+            'example': 'curl -X POST "https://ai-sentiment-app-o5i3f.ondigitalocean.app/analyze" -H "Content-Type: application/json" -d \'{"text": "I love this product!"}\''
         }
     })
 
@@ -350,16 +381,22 @@ def diagnostic():
             'model_dir': os.path.abspath(MODEL_DIR),
             'model_file': os.path.abspath(MODEL_FILE),
             'vectorizer_file': os.path.abspath(VECTORIZER_FILE),
+            'encoder_file': os.path.abspath(ENCODER_FILE),
             'model_dir_exists': os.path.exists(MODEL_DIR),
             'model_file_exists': os.path.exists(MODEL_FILE),
             'vectorizer_file_exists': os.path.exists(VECTORIZER_FILE),
+            'encoder_file_exists': os.path.exists(ENCODER_FILE),
+            'confidence_threshold': CONFIDENCE_THRESHOLD,
         },
         'model_status': {
             'model_loaded': model is not None,
             'vectorizer_loaded': vectorizer is not None,
+            'encoder_loaded': encoder is not None,
             'model_type': str(type(model)) if model is not None else None,
             'vectorizer_type': str(type(vectorizer)) if vectorizer is not None else None,
+            'encoder_type': str(type(encoder)) if encoder is not None else None,
             'model_classes': list(model.classes_) if model is not None and hasattr(model, 'classes_') else None,
+            'encoder_classes': list(encoder.classes_) if encoder is not None and hasattr(encoder, 'classes_') else None,
         },
         'nltk_status': {
             'nltk_data_path': nltk.data.path,
@@ -388,6 +425,7 @@ def diagnostic():
 @app.errorhandler(Exception)
 def handle_error(e):
     logger.error(f"Unhandled exception: {str(e)}")
+    logger.error(traceback.format_exc())
     return jsonify({
         'error': str(e),
         'description': 'An unexpected server error occurred.'
@@ -407,7 +445,7 @@ def create_fallback_model():
     try:
         logger.info("Creating fallback model for basic functionality...")
         
-        # Sample data for a very simple model
+        # Sample data for a very simple XGBoost model
         texts = [
             "I love this product! It's amazing.", 
             "This is great! I'm happy with my purchase.",
@@ -417,20 +455,30 @@ def create_fallback_model():
             "This is terrible. I hate it.",
             "Worst product ever. Completely disappointed."
         ]
-        labels = np.array(["positive", "positive", "positive", "neutral", "neutral", "negative", "negative"])
+        labels = ['positive', 'positive', 'positive', 'neutral', 'neutral', 'negative', 'negative']
+        
+        # Preprocess the texts
+        processed_texts = [preprocess_text(text) for text in texts]
+        
+        # Create a simple label encoder
+        from sklearn.preprocessing import LabelEncoder
+        fallback_encoder = LabelEncoder()
+        encoded_labels = fallback_encoder.fit_transform(labels)
         
         # Create a simple vectorizer
         fallback_vectorizer = TfidfVectorizer(max_features=1000, ngram_range=(1, 2))
-        X = fallback_vectorizer.fit_transform(texts)
+        X = fallback_vectorizer.fit_transform(processed_texts)
         
-        # Train a simple model
-        fallback_model = LogisticRegression(max_iter=1000)
-        fallback_model.fit(X, labels)
+        # Train a simple XGBoost model
+        from xgboost import XGBClassifier
+        fallback_model = XGBClassifier(n_estimators=50, max_depth=3)
+        fallback_model.fit(X, encoded_labels)
         
         # Save the fallback models
         os.makedirs(MODEL_DIR, exist_ok=True)
         joblib.dump(fallback_model, MODEL_FILE)
         joblib.dump(fallback_vectorizer, VECTORIZER_FILE)
+        joblib.dump(fallback_encoder, ENCODER_FILE)
         
         logger.info("Fallback model created and saved successfully.")
         return True
